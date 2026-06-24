@@ -8,7 +8,7 @@ export const TableDespachos = () => {
 
   const despacho = async () => {
     await axios
-      .get("http://192.168.3.20/api/v1/despachos", {
+      .get("http://078179906851/api/v1/despachos", {
         headers:{
               'Content-Type': 'application/json',
               'Accept': 'application/json'
@@ -40,7 +40,7 @@ export const TableDespachos = () => {
             <table className="table-fixed">
               <thead>
                 <tr className="py-10">
-                  <th className="pr-10">Orden de despacho</th>
+                  <th className="pr-10">Orden de despacho;</th>
                   <th className="pr-10">Orden de compra</th>
                   <th className="pr-10">Dirección de entrega</th>
                   <th className="pr-10">Fecha despacho</th>
