@@ -1,73 +1,58 @@
-name: ci_cd_front_despacho
+name: CI/CD Frontend → ECR + EKS
+
 on:
-  repository_dispatch:
-    types:
-      - frontend
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: front-despacho
+  EKS_CLUSTER: eks-prueba3         
+  NAMESPACE: innovatech
+  DEPLOYMENT_NAME: front-despacho
+
 jobs:
-  build:
-    runs-on: ubuntu-latest #maquina del github
-    steps: #added checkout para traerse el repo a la máquina de github
-      - name: Comprobar el código/repositorio
-        uses: myci-actions/checkout@8
+  build-and-deploy:
+    runs-on: ubuntu-latest
 
-        #configuración doppler
-      - name: Instalar Doppler CLI
-        uses: dopplerhq/cli-action@v3
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
 
-      - name: Configurar Doppler CLI
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.ASIAREM7CWUR7CUNLF2R }}
+          aws-secret-access-key: ${{ secrets.e2/KAeGkJjAQSzbV2oETH2socYG5E7wofOlF1ePY }}
+          aws-session-token: ${{ secrets.IQoJb3JpZ2luX2VjEHEaCXVzLXdlc3QtMiJGMEQCIGVGOnc7cTUZ2TPOJvCZIe2SdDCGo5lNOAZriejjt475AiBJwf5i+Kome/H0mLDpKQk+37/albZqi/w3mJ4sXOLL9CqmAgg6EAEaDDA3ODE3OTkwNjg1MSIMtdmRA1647pnmjgxeKoMCE/du7PDFgSv61KdHy7yC0HOWwadi9ojTVXEFNa+whW1UgJ8DS5/fw7RBcoWJoDZDx/OhoQwq9o5d+q+EhOcawAdTxitxykmtoOqOvOjTEGJCWAzM560hFNduMVacAqpxitwtSWDUbZHCN9hEkqFM5unGtfH6KJjzW68vh1xIE3OmMF/J6YgNFPsACa0OP8IasRGF2cVyP8jg4zDRdEeQYUbBgSQ2/aBLg39mWcKbrwMF+NMCO9P5k3nPH6LBbn7jFsOtt0hp2qjsJLiH9V8Rfk+F9TNDxPRZ2akYtp17kmo1lNS55rAZdxUv2qUCIdbiS6usNys4u7+kGrHJ3kxKYVO6jTDun/DRBjqeAbZ0BdApW+Iof5uUDXgQecQd3C6gn7t8CCDyQ7ymArsQukKG9ariefLZIuyKVNIWKNmkE0qR1kv20jtjiPhkTvP9AbbWFcMS87mJVbQEIVmHDQ+5a95VbL3VGkYjTjvjayEEV3S+TPtYuvVny6VMCrk9Rq7xoK3QeX4bCUwakjGih06vyxWdKtheKj4QSpV9TopOTT9Hx4XPhkOHtmbZ}}
+          aws-region: ${{ env.us-east-1 }}
+
+      - name: Login a Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag y push imagen a ECR
+        id: build-image
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
-        run: doppler setup --token $DOPPLER_TOKEN
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
+      - name: Conectar kubectl al clúster EKS
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER
 
-      - name: Obtener secretos desde Doppler
+      - name: Desplegar en EKS
         env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "SERVIDOR_FRONTEND=$(doppler secrets get SERVIDOR_FRONTEND --plain)" >> $GITHUB_ENV
-          echo "${{ env.SERVIDOR_FRONTEND }}"
-
-
-
-      - name: crear carpeta en el servidor AWS ec2
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ env.SERVIDOR_FRONTEND }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.EC2_KEY }}
-          port: ${{ secrets.PORT }}
-          script: |
-            mkdir -p /home/ubuntu/front_despacho
-
-      - name: crear el ssh desde el servidor de github secrets a la maquina ec2
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-
-      - name: Deploy archivos al servidor con rsync sincroniza directorio del repo github, hacia el servidor ec2
-        uses: burnett01/rsync-deployments@7.0.2
-        with:
-          switches: "-avz --delete" #opciones de rsync
-          path: "./" #directorio de origen
-          remote_host: ${{ env.SERVIDOR_FRONTEND }} #direccion IP del servidor
-          remote_user: ${{ secrets.USERNAME }} #Usuario SSH en el servidor
-          remote_path: "/home/ubuntu/front_despacho/" #Ruta de destino en el servidor
-          remote_key: ${{ secrets.EC2_KEY }} #Clave ssh para autenticas
-          remote_port: ${{ secrets.PORT }} #puerto ssh
-
-      - name: sleep
-        run: sleep 20
-        
-      - name: Ejecutar docker-compose para el deploy de nginx aislado
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ env.SERVIDOR_FRONTEND }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.EC2_KEY }}
-          port: ${{ secrets.PORT }}
-          script: |
-            cd /home/ubuntu/front_despacho
-            sudo docker-compose down || true
-            sudo docker-compose up -d --build
-            sudo docker image prune -f
+          kubectl set image deployment/$DEPLOYMENT_NAME \
+            front-despacho=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -n $NAMESPACE
+          kubectl rollout status deployment/$DEPLOYMENT_NAME -n $NAMESPACE
